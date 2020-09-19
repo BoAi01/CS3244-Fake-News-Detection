@@ -1,0 +1,9 @@
+News_dataset/
+*.sh
+output/
+input/
+input_test/
+*_dict
+*_postings
+
+.vscode/

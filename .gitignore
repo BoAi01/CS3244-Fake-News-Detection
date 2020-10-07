@@ -7,3 +7,7 @@ input_test/
 *_postings
 
 .vscode/
+venv/
+.idea/
+News_dataset_mid/
+News_dataset_short/

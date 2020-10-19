@@ -7,3 +7,4 @@ input_test/
 *_postings
 
 .vscode/
+.ipynb_checkpoints

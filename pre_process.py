@@ -162,8 +162,8 @@ def build_index(in_dir, out_dict, out_postings, N):
     processor.build_dic_and_posting()
 
 # TODO
-N = 1
-input_directory = "input/"
+N = "gru_short_test"
+input_directory = "input_short_test/"
 output_file_dictionary = str(N) + "_dict"
 output_file_postings = str(N) + "_postings"
 

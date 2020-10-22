@@ -12,10 +12,10 @@ from sklearn.preprocessing import MinMaxScaler
 
 # Hyperparameters and constants
 N_FEATURES = 2**12
-N_EPOCHS = 2
-CSV_SOURCE = 'News_dataset/'
-MODEL_PATH = 'gru_model.pt'
-USING_EXISTING_MODEL = True
+N_EPOCHS = 5
+CSV_SOURCE = 'News_dataset_FakeNewsNet/'
+MODEL_PATH = 'gru_model_second_dataset.pt'
+USING_EXISTING_MODEL = False
 
 
 class GRUNet(nn.Module):
@@ -76,7 +76,7 @@ def train(train_loader, learn_rate, hidden_dim=256, epoch_count=N_EPOCHS):
         print("Training epoch {}/{} completed. Total Loss: {:.8f}. Time Taken: {:.3f} seconds.".format(
             epoch, epoch_count, avg_loss / len(train_loader), epoch_end_timestep - epoch_start_timestep))
         epoch_start_timestep = epoch_end_timestep
-    print("Training completed. Total time taken: {:.3f}".format(epoch_start_timestep - preprocessing_done))
+    print("Training completed. Total time taken: {:.3f} seconds.".format(epoch_start_timestep - preprocessing_done))
     return model
 
 
@@ -111,11 +111,11 @@ print("Starting process...")
 process_start = time.perf_counter()
 
 print("Assigning truth targets to training data...")
-true_data = pd.read_csv(CSV_SOURCE + 'True.csv')
+true_data = pd.read_csv(CSV_SOURCE + 'fnn_dev_true.csv')
 true_data["is_fake"] = "0"
-fake_data = pd.read_csv(CSV_SOURCE + 'Fake.csv')
+fake_data = pd.read_csv(CSV_SOURCE + 'fnn_dev_false.csv')
 fake_data["is_fake"] = "1"
-dataset = pd.concat([true_data["text"], fake_data["text"]])
+dataset = pd.concat([true_data["fullText_based_content"], fake_data["fullText_based_content"]])
 dataset.fillna(value="", inplace=True)
 dataset_values = pd.concat([true_data["is_fake"], fake_data["is_fake"]])
 

@@ -1,444 +1,160 @@
+import time
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
+from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
-import transformers
-from transformers import AutoModel, BertTokenizerFast
-import os
-from transformers import AdamW
-from transformers import get_cosine_schedule_with_warmup
-from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
-from sklearn.utils.class_weight import compute_class_weight
-import warnings
-warnings.filterwarnings("ignore")
+from sklearn.metrics import log_loss, accuracy_score
+from sklearn.preprocessing import MinMaxScaler
 
-# specify GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-print(f'GPU count: {torch.cuda.device_count()}')
 
-# reproducibility
-SEED = 0
-torch.manual_seed(SEED)
-torch.cuda.manual_seed(SEED)
-np.random.seed(SEED)
-torch.backends.cudnn.deterministic = True
+# Hyperparameters and constants
+N_FEATURES = 2**12
+N_EPOCHS = 5
+CSV_SOURCE = 'News_dataset_FakeNewsNet/'
+MODEL_PATH = 'gru_model_second_dataset.pt'
+USING_EXISTING_MODEL = False
 
-# training config
-root = "/home/aibo/recent/FNID-dataset/FakeNewsNet"
-max_seq_len = 512
-learning_rate = 5e-5
-batch_size = 32
-epochs = 8
-print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs}\n")
 
-# # Load Dataset
-file_names = ["fnn_train.csv", "fnn_dev.csv", "fnn_test.csv"]
-train_path = os.path.join(root, file_names[0])
-val_path = os.path.join(root, file_names[1])
-test_path = os.path.join(root, file_names[2])
+class GRUNet(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers, drop_prob=0.2):
+        super(GRUNet, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
 
-# In[ ]:
-train_sample = pd.read_csv(train_path)
-val_sample = pd.read_csv(val_path)
-test_sample = pd.read_csv(test_path)
-
-train_sample = train_sample.rename(columns={'label_fnn': 'label'})
-val_sample = val_sample.rename(columns={'label_fnn': 'label'})
-test_sample = test_sample.rename(columns={'label_fnn': 'label'})
-
-train_sample['label'] = train_sample['label'].apply(lambda x: 1 if x == 'real' else 0)
-val_sample['label'] = val_sample['label'].apply(lambda x: 1 if x == 'real' else 0)
-test_sample['label'] = test_sample['label'].apply(lambda x: 1 if x == 'real' else 0)
-
-train_sample = train_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
-val_sample = val_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
-test_sample = test_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
-
-train_text = train_sample.values.tolist()
-val_text = val_sample.values.tolist()
-test_text = test_sample.values.tolist()
-
-train_labels = list(map(lambda x: x[1], train_text))
-train_text = list(map(lambda x: x[0], train_text))
-val_labels = list(map(lambda x: x[1], val_text))
-val_text = list(map(lambda x: x[0], val_text))
-test_labels = list(map(lambda x: x[1], test_text))
-test_text = list(map(lambda x: x[0], test_text))
-
-# # Import BERT Model and BERT Tokenizer
-# import BERT-base pretrained model
-bert = AutoModel.from_pretrained('bert-base-uncased')
-# Load the BERT tokenizer
-tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
-
-# sample data
-text = ["this is a bert model tutorial", "we will fine-tune a bert model"]
-# encode text
-sent_id = tokenizer.batch_encode_plus(text, padding=True, return_token_type_ids=False)
-
-# # Tokenization
-# tokenize and encode sequences in the training set
-tokens_train = tokenizer.batch_encode_plus(
-    train_text,
-    max_length=max_seq_len,
-    pad_to_max_length=True,
-    truncation=True,
-    return_token_type_ids=False
-)
-
-# tokenize and encode sequences in the validation set
-tokens_val = tokenizer.batch_encode_plus(
-    val_text,
-    max_length=max_seq_len,
-    pad_to_max_length=True,
-    truncation=True,
-    return_token_type_ids=False
-)
-
-# tokenize and encode sequences in the test set
-tokens_test = tokenizer.batch_encode_plus(
-    test_text,
-    max_length=max_seq_len,
-    pad_to_max_length=True,
-    truncation=True,
-    return_token_type_ids=False
-)
-
-# # Convert Integer Sequences to Tensors
-# for train set
-train_seq = torch.tensor(tokens_train['input_ids'])
-train_mask = torch.tensor(tokens_train['attention_mask'])
-train_y = torch.tensor(train_labels)
-
-# for validation set
-val_seq = torch.tensor(tokens_val['input_ids'])
-val_mask = torch.tensor(tokens_val['attention_mask'])
-val_y = torch.tensor(val_labels)
-
-# for test set
-test_seq = torch.tensor(tokens_test['input_ids'])
-test_mask = torch.tensor(tokens_test['attention_mask'])
-test_y = torch.tensor(test_labels)
-
-print(f'shape of train val test set: {train_y.shape}, {val_y.shape}, {test_y.shape}')
-
-# # Create DataLoaders
-# wrap tensors
-train_data = TensorDataset(train_seq, train_mask, train_y)
-train_sampler = RandomSampler(train_data)
-train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
-
-val_data = TensorDataset(val_seq, val_mask, val_y)
-val_sampler = SequentialSampler(val_data)
-val_dataloader = DataLoader(val_data, sampler=val_sampler, batch_size=batch_size)
-
-test_data = TensorDataset(test_seq, test_mask, test_y)
-test_sampler = SequentialSampler(test_data)
-test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=batch_size)
-
-"""# # Freeze BERT Parameters
-for param in bert.parameters():
-    param.requires_grad = False"""
-
-# # Define Model Architecture
-class BERT_Arch(nn.Module):
-
-    def __init__(self, bert):
-        super(BERT_Arch, self).__init__()
-
-        self.bert = bert
-
-        # dropout layer
-        self.dropout = nn.Dropout(0.2)
-
-        # relu activation function
+        self.gru = nn.GRU(input_dim, hidden_dim, n_layers, dropout=drop_prob)
+        self.fc = nn.Linear(hidden_dim, output_dim)
         self.relu = nn.ReLU()
 
-        # dense layer 1
-        self.fc = nn.Sequential(
-            nn.Linear(768, 2)
-        )
+    def forward(self, x, h):
+        out, h = self.gru(x, h)
+        out = self.fc(self.relu(out[:, -1]))
+        return out, h
 
-        # softmax activation function
-        self.softmax = nn.LogSoftmax(dim=1)
+    def init_hidden(self, batch_size):
+        weight = next(self.parameters()).data
+        hidden = weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().to(device)
+        return hidden
 
-    # define the forward pass
-    def forward(self, sent_id, mask):
-        # pass the inputs to the model
-        _, cls_hs = self.bert(sent_id, attention_mask=mask)
 
-        x = cls_hs
+def train(train_loader, learn_rate, hidden_dim=256, epoch_count=N_EPOCHS):
+    # Setting common hyperparameters
+    input_dim = next(iter(train_loader))[0].shape[2]
+    output_dim = 1
+    n_layers = 2
 
-        x = self.dropout(x)
+    # Instantiating the models
+    model = GRUNet(input_dim, hidden_dim, output_dim, n_layers)
+    model.to(device)
 
-        # output layer
-        x = self.fc(x)
-
-        # apply softmax activation
-        x = self.softmax(x)
-
-        return x
-
-# pass the pre-trained BERT to our define architecture and push the model to GPU
-model = BERT_Arch(bert).cuda()
-model = nn.DataParallel(model)
-
-# optimizer from hugging face transformers
-# define the optimizer
-optimizer = AdamW(model.parameters(), lr=learning_rate)
-
-# define the scheduler
-# scheduler = get_cosine_schedule_with_warmup(optimizer, )
-
-# # Find Class Weights
-# compute the class weights
-class_wts = compute_class_weight('balanced', np.unique(train_labels), train_labels)
-print(f'class weights: {class_wts}')
-
-# convert class weights to tensor
-weights = torch.tensor(class_wts, dtype=torch.float)
-weights = weights.cuda()
-
-# loss function
-cross_entropy = nn.NLLLoss(weight=weights)
-
-# # Fine-Tune BERT
-class AverageMeter(object):
-    """
-    Computes and stores the average and current value
-    """
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-def topk_accuracy(k, outputs, targets):
-    """
-    Compute top k accuracy
-    """
-    batch_size = targets.size(0)
-
-    _, pred = outputs.topk(k, 1, True)
-    pred = pred.t()
-    correct = pred.eq(targets.view(1, -1))
-    n_correct_elems = correct.type(torch.FloatTensor).sum().item()
-
-    return n_correct_elems / batch_size
-
-def top1_accuracy(outputs, targets):
-    return topk_accuracy(1, outputs, targets)
-
-# function to train the model
-def train():
-    train_acc, val_acc, train_loss, val_loss = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
-
-    print("\nTraining...")
+    # Defining loss function and optimizer
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
 
     model.train()
+    print("\nStarting the GRU model training:\n")
 
-    total_loss, total_accuracy = 0, 0
+    epoch_start_timestep = time.perf_counter()
 
-    # empty list to save model predictions
-    total_preds = []
+    # Start training loop
+    for epoch in range(1, epoch_count + 1):
+        h = model.init_hidden(batch_size)
+        avg_loss = 0.
+        counter = 0
+        for x, label in train_loader:
+            counter += 1
+            h = h.data
+            model.zero_grad()
+            out, h = model(x.to(device).float(), h)
+            loss = criterion(out, label.to(device).float())
+            loss.backward()
+            optimizer.step()
+            avg_loss += loss.item()
+        epoch_end_timestep = time.perf_counter()
+        print("Training epoch {}/{} completed. Total Loss: {:.8f}. Time Taken: {:.3f} seconds.".format(
+            epoch, epoch_count, avg_loss / len(train_loader), epoch_end_timestep - epoch_start_timestep))
+        epoch_start_timestep = epoch_end_timestep
+    print("Training completed. Total time taken: {:.3f} seconds.".format(epoch_start_timestep - preprocessing_done))
+    return model
 
-    # iterate over batches
-    for step, batch in enumerate(train_dataloader):
 
-        # progress update after every 50 batches.
-        if step % 50 == 0 and not step == 0:
-            print('Batch {} of {}: loss {:.5f}, acc {:.5f}'.format(step, len(train_dataloader), train_loss.avg,
-                                                                   train_acc.avg))
-
-        # push the batch to gpu
-        batch = [r.cuda() for r in batch]
-
-        sent_id, mask, labels = batch
-
-        # clear previously calculated gradients
-        model.zero_grad()
-
-        # get model predictions for the current batch
-        preds = model(sent_id, mask)
-
-        # compute the loss between actual and predicted values
-        loss = cross_entropy(preds, labels)
-        train_loss.update(loss.item())
-
-        acc = top1_accuracy(preds, labels)
-        train_acc.update(acc)
-
-        # add on to the total loss
-        total_loss = total_loss + loss.item()
-
-        # backward pass to calculate the gradients
-        loss.backward()
-
-        # clip the the gradients to 1.0. It helps in preventing the exploding gradient problem
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
-        # update parameters
-        optimizer.step()
-
-        # model predictions are stored on GPU. So, push it to CPU
-        preds = preds.detach().cpu().numpy()
-
-        # append the model predictions
-        total_preds.append(preds)
-
-    print('Training finished: loss {:.5f}, acc {:.5f}'.format(train_loss.avg, train_acc.avg))
-
-    # compute the training loss of the epoch
-    avg_loss = total_loss / len(train_dataloader)
-
-    # predictions are in the form of (no. of batches, size of batch, no. of classes).
-    # reshape the predictions in form of (number of samples, no. of classes)
-    total_preds = np.concatenate(total_preds, axis=0)
-
-    # returns the loss and predictions
-    return avg_loss, total_preds
-
-# function for evaluating the model
-def evaluate():
-    train_acc, val_acc, train_loss, val_loss = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
-
-    print("\nEvaluating...")
-
-    # deactivate dropout layers
+def evaluate(model, test_x, test_y):
+    number_of_test_cases = list(test_x.size())[0]
+    print("\nTesting the model:\nNumber of test cases: {}\n".format(number_of_test_cases))
+    evaluation_start = time.perf_counter()
     model.eval()
-
-    total_loss, total_accuracy = 0, 0
-
-    # empty list to save the model predictions
-    total_preds = []
-
-    # iterate over batches
-    for step, batch in enumerate(val_dataloader):
-
-        # Progress update every 50 batches.
-        if step % 10 == 0 and not step == 0:
-            # Report progress.
-            print(
-                'Batch {} of {}: loss {:.2f}, acc {:.5f}'.format(step, len(val_dataloader), val_loss.avg, val_acc.avg))
-
-        # push the batch to gpu
-        batch = [t.cuda() for t in batch]
-
-        sent_id, mask, labels = batch
-
-        # deactivate autograd
-        with torch.no_grad():
-
-            # model predictions
-            preds = model(sent_id, mask)
-
-            # compute the validation loss between actual and predicted values
-            loss = cross_entropy(preds, labels)
-            val_loss.update(loss.item())
-
-            acc = top1_accuracy(preds, labels)
-            val_acc.update(acc)
-
-            total_loss = total_loss + loss.item()
-
-            preds = preds.detach().cpu().numpy()
-
-            total_preds.append(preds)
-
-    print('Evaluation finished: loss {:.2f}, acc {:.5f}'.format(val_loss.avg, val_acc.avg))
-
-    # compute the validation loss of the epoch
-    avg_loss = total_loss / len(val_dataloader)
-
-    # reshape the predictions in form of (number of samples, no. of classes)
-    total_preds = np.concatenate(total_preds, axis=0)
-
-    return avg_loss, total_preds
+    outputs = []
+    targets = []
+    scaler = MinMaxScaler()
+    scaler.fit(test_y)
+    for i in range(number_of_test_cases):
+        inp = torch.unsqueeze(torch.from_numpy(np.array(test_x[i])), dim=0)
+        labs = torch.unsqueeze(torch.from_numpy(np.array(test_y[i])), dim=0)
+        h = model.init_hidden(inp.shape[0])
+        out, h = model(inp.to(device).float(), h)
+        outputs.append(round(out.item()))
+        targets.append(round(labs.item()))
+    accuracy = accuracy_score(targets, outputs)
+    evaluation_end = time.perf_counter()
+    print("Time taken: {:.3f} seconds".format(evaluation_end - evaluation_start))
+    print("Accuracy: {}\n".format(accuracy))
+    print("Sample outputs: {}".format(outputs[:10]))
+    print("Respective targets: {}".format(targets[:10]))
+    return outputs, targets, accuracy
 
 
-# # Start Model Training
-# set initial loss to infinite
-best_valid_loss = float('inf')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# empty lists to store training and validation loss of each epoch
-train_losses = []
-valid_losses = []
+print("Starting process...")
+process_start = time.perf_counter()
 
-# for each epoch
-best_model_name = 'saved_weights.pt'
-for epoch in range(epochs):
+print("Assigning truth targets to training data...")
+true_data = pd.read_csv(CSV_SOURCE + 'fnn_dev_true.csv')
+true_data["is_fake"] = "0"
+fake_data = pd.read_csv(CSV_SOURCE + 'fnn_dev_false.csv')
+fake_data["is_fake"] = "1"
+dataset = pd.concat([true_data["fullText_based_content"], fake_data["fullText_based_content"]])
+dataset.fillna(value="", inplace=True)
+dataset_values = pd.concat([true_data["is_fake"], fake_data["is_fake"]])
 
-    print('\n Epoch {:} / {:}'.format(epoch + 1, epochs))
+print("Total entries found: {}\n".format(len(dataset)))
 
-    # train model
-    t_loss, _ = train()
+print("Splitting data into train and test...")
+X_train, X_test, y_train, y_test = train_test_split(dataset, dataset_values, train_size=0.8, random_state=0)
+print("Number of training examples: {}".format(len(y_train)))
+print("Number of testing examples: {}".format(len(y_test)))
 
-    # evaluate model
-    v_loss, _ = evaluate()
+print("Hashing input features...")
+vectorizer = HashingVectorizer(n_features=N_FEATURES, ngram_range=(1, 3))
+train_features = vectorizer.fit_transform(X_train).toarray()
+test_features = vectorizer.fit_transform(X_test).toarray()
 
-    # save the best model
-    if v_loss < best_valid_loss:
-        best_valid_loss = v_loss
-        torch.save(model.state_dict(), best_model_name)
+print("Loading data...")
+X_train_tensor = torch.unsqueeze(torch.from_numpy(train_features), dim=1).float()
+y_train_tensor = torch.unsqueeze(torch.from_numpy(y_train.to_numpy(dtype="float64")), dim=1).float()
+X_test_tensor = torch.unsqueeze(torch.from_numpy(test_features), dim=1).float()
+y_test_tensor = torch.unsqueeze(torch.from_numpy(y_test.to_numpy(dtype="float64")), dim=1).float()
 
-    # append training and validation loss
-    train_losses.append(t_loss)
-    valid_losses.append(v_loss)
+batch_size = 1
+train_data = TensorDataset(X_train_tensor, y_train_tensor)
+train_loader = DataLoader(train_data, shuffle=True, batch_size=batch_size)
 
-    print(f'\nTraining Loss: {t_loss:.6f}')
-    print(f'Validation Loss: {v_loss:.6f}')
+preprocessing_done = time.perf_counter()
+print("Time taken for pre-processing tasks: {:.3f} seconds".format(preprocessing_done - process_start))
 
-# torch.save(model.state_dict(), '/content/drive/My Drive/CS3244/models/BERT_L64_0.041.pt')
 
-# In[ ]:
-# load weights of best model
-model.load_state_dict(torch.load(best_model_name))
-
-# # Get Predictions for Test Data
-# wrap tensors
-total_preds, total_labels = [], []
-
-print("\ntesting...")
-for step, batch in enumerate(test_dataloader):
-    if step % 50 == 0:
-        print('Batch {} of {}'.format(step, len(test_dataloader)))
-
-    # push the batch to gpu
-    batch = [t.cuda() for t in batch]
-
-    sent_id, mask, labels = batch
-
-    # deactivate autograd
-    with torch.no_grad():
-        preds = model(sent_id, mask).detach().cpu().numpy()
-        total_preds.append(preds)
-        total_labels.append(labels.detach().cpu().numpy())
-
-total_preds = np.concatenate(total_preds, axis=0)
-total_labels = np.concatenate(total_labels, axis=0)
-
-print(total_preds.shape, total_labels.shape)
-
-preds = np.argmax(total_preds, axis=1)
-print(classification_report(test_y, preds))
-
-print(f'\nfinal test accuracy {np.sum(np.array(preds) == np.array(test_y)) / preds.shape[0]}\n')
-print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs}\n")
-
-# confusion matrix
-pd.crosstab(test_y, preds)
-print(pd)
-
-# torch.save(model.state_dict(), '/content/drive/My Drive/CS3244/models/BERT_L64_best.pt')
+if USING_EXISTING_MODEL:
+    input_dim = next(iter(train_loader))[0].shape[2]
+    hidden_dim = 256
+    output_dim = 1
+    n_layers = 2
+    gru_model = GRUNet(input_dim, hidden_dim, output_dim, n_layers)
+    gru_model.load_state_dict(torch.load(MODEL_PATH))
+    gru_outputs, targets, gru_sMAPE = evaluate(gru_model, X_test_tensor, y_test_tensor)
+else:
+    learning_rate = 0.001
+    gru_model = train(train_loader, learning_rate)
+    gru_outputs, targets, gru_sMAPE = evaluate(gru_model, X_test_tensor, y_test_tensor)
+    torch.save(gru_model.state_dict(), MODEL_PATH)

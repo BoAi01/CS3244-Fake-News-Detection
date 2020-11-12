@@ -31,7 +31,12 @@ max_seq_len = 512
 learning_rate = 5e-5
 batch_size = 32
 epochs = 8
-print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs}\n")
+random_init = False
+resplit = True
+dropout = 0.5
+ratio = 0.5
+print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs},"
+      f"dropout = {dropout}\n")
 
 # # Load Dataset
 file_names = ["fnn_train.csv", "fnn_dev.csv", "fnn_test.csv"]
@@ -52,20 +57,38 @@ train_sample['label'] = train_sample['label'].apply(lambda x: 1 if x == 'real' e
 val_sample['label'] = val_sample['label'].apply(lambda x: 1 if x == 'real' else 0)
 test_sample['label'] = test_sample['label'].apply(lambda x: 1 if x == 'real' else 0)
 
-train_sample = train_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
-val_sample = val_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
-test_sample = test_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
+if not resplit:
+    train_sample = train_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
+    val_sample = val_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
+    test_sample = test_sample.drop(columns=['id', 'date', 'speaker', 'statement', 'sources', 'paragraph_based_content'])
 
-train_text = train_sample.values.tolist()
-val_text = val_sample.values.tolist()
-test_text = test_sample.values.tolist()
+    train_text = train_sample.values.tolist()
+    val_text = val_sample.values.tolist()
+    test_text = test_sample.values.tolist()
 
-train_labels = list(map(lambda x: x[1], train_text))
-train_text = list(map(lambda x: x[0], train_text))
-val_labels = list(map(lambda x: x[1], val_text))
-val_text = list(map(lambda x: x[0], val_text))
-test_labels = list(map(lambda x: x[1], test_text))
-test_text = list(map(lambda x: x[0], test_text))
+    train_labels = list(map(lambda x: x[1], train_text))
+    train_text = list(map(lambda x: x[0], train_text))
+    val_labels = list(map(lambda x: x[1], val_text))
+    val_text = list(map(lambda x: x[0], val_text))
+    test_labels = list(map(lambda x: x[1], test_text))
+    test_text = list(map(lambda x: x[0], test_text))
+
+else:
+    df = pd.concat([train_sample, val_sample, test_sample], ignore_index=True, sort=False).sample(frac=1).reset_index(drop=True)
+    df = df[:int(df.shape[0] * ratio)]  # take a portion
+    train_text, temp_text, train_labels, temp_labels = train_test_split(df['fullText_based_content'], df['label'],
+                                                                    random_state=2020,
+                                                                    test_size=0.2,
+                                                                    stratify=df['label'])
+
+    # we will use temp_text and temp_labels to create validation and test set
+    val_text, test_text, val_labels, test_labels = train_test_split(temp_text, temp_labels,
+                                                                random_state=2020,
+                                                                test_size=0.5,
+                                                                stratify=temp_labels)
+    train_text, val_text, test_text, train_labels, val_labels, test_labels = train_text.tolist(), val_text.tolist(), \
+                                                                         test_text.tolist(), train_labels.tolist(), \
+                                                                         val_labels.tolist(), test_labels.tolist()
 
 # # Import BERT Model and BERT Tokenizer
 # import BERT-base pretrained model
@@ -151,7 +174,7 @@ class BERT_Arch(nn.Module):
         self.bert = bert
 
         # dropout layer
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(dropout)
 
         # relu activation function
         self.relu = nn.ReLU()
@@ -185,9 +208,18 @@ class BERT_Arch(nn.Module):
 model = BERT_Arch(bert).cuda()
 model = nn.DataParallel(model)
 
+def init_weights(m):
+    if type(m) == nn.Linear:
+        torch.nn.init.xavier_uniform(m.weight)
+        m.bias.data.fill_(0.01)
+
+if random_init:
+    model.apply(init_weights)
+    print("xavier_uniform initialization successful")
+
 # optimizer from hugging face transformers
 # define the optimizer
-optimizer = AdamW(model.parameters(), lr=learning_rate)
+optimizer = AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=0.01*5)
 
 # define the scheduler
 # scheduler = get_cosine_schedule_with_warmup(optimizer, )
@@ -377,7 +409,7 @@ train_losses = []
 valid_losses = []
 
 # for each epoch
-best_model_name = 'saved_weights.pt'
+best_model_name = f'saved_weights_msl{max_seq_len}_lr{learning_rate}_e{epochs}_ri{random_init}.pt'
 for epoch in range(epochs):
 
     print('\n Epoch {:} / {:}'.format(epoch + 1, epochs))
@@ -435,7 +467,8 @@ preds = np.argmax(total_preds, axis=1)
 print(classification_report(test_y, preds))
 
 print(f'\nfinal test accuracy {np.sum(np.array(preds) == np.array(test_y)) / preds.shape[0]}\n')
-print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs}\n")
+print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs},"
+      f"dropout = {dropout}\n")
 
 # confusion matrix
 pd.crosstab(test_y, preds)

@@ -17,3 +17,7 @@ Second_dataset/gru_model_second_dataset/
 data/
 saved_models/
 preprocessing/
+News_dataset/
+.ipynb_checkpoints
+News_dataset_mid/
+News_dataset_short/

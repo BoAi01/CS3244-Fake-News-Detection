@@ -1,4 +1,4 @@
-News_dataset/
+data/first_dataset/News_dataset/
 *.sh
 output/
 input/
@@ -9,5 +9,11 @@ input_test/
 .vscode/
 venv/
 .idea/
-News_dataset_mid/
-News_dataset_short/
+data/first_dataset/News_dataset_mid/
+data/first_dataset/News_dataset_short/
+Second_dataset/News_dataset_FakeNewsNet/
+Second_dataset/Second_News_dataset/
+Second_dataset/gru_model_second_dataset/
+data/
+saved_models/
+preprocessing/

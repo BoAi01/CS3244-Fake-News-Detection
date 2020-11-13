@@ -1,5 +1,22 @@
 ## CS3244-fake-news-detection
 
+This repository contains the source code used in implementing the 3 ML models and 3 DL models used in the project, in addition to 2 other ML models that were ultimately not discussed.
+
+## Models included:
+### Traditional Machine Learning models
+1. Logistic Regression
+2. k-Nearest-Neighbours
+3. Support Vector Machine
+
+### Deep Learning models
+1. Bi-Directional Long Short-Term Memory
+2. Gated Recurrent Units
+3. Bi-Directional Encoder Representations from Transformers
+
+### Other Machine Learning models
+1. Naive Bayes
+2. Random Forest
+
 ### NOTE & Preparation
     1. document ID for fake news starts from: 21417
     2. install nltk:

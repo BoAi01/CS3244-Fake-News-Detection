@@ -1,6 +1,8 @@
 ## CS3244-fake-news-detection
 
-This repository contains the source code used in implementing the 3 ML models and 3 DL models used in the project, in addition to 2 other ML models that were ultimately not discussed.
+This repository contains the source code for a student project, fake news detection, in module CS3244 Machine Learning, at the School of Computing (SoC), National University of Singapore (NUS). The project aims to find efficient and accurate ways of classifying fake news based only on body text of new articles. Multiple traditional ML and DL models are benchmarked on two datasets, [ISOT] (https://www.uvic.ca/engineering/ece/isot/datasets/fake-news/index.php), and [FakeNewsNet](https://ieee-dataport.org/open-access/fnid-fake-news-inference-dataset#files). We achieved decent accuracies on both datasets, and further investigation is conducted to analyse some key observations. See [paper](https://drive.google.com/file/d/1KhcO22HTHitYyAhgO58Z-VYYUfzr-JLC/view?usp=sharing) for details. 
+
+Apart from 3 ML and 3 DL models reported in the papper, 2 other ML models are also included. 
 
 ## Models included:
 ### Traditional Machine Learning models

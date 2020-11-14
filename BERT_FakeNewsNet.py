@@ -26,7 +26,7 @@ np.random.seed(SEED)
 torch.backends.cudnn.deterministic = True
 
 # training config
-root = "/home/aibo/recent/FNID-dataset/FakeNewsNet"
+root = "/home/aibo/recent/FNID-dataset/FakeNewsNet"     # directory of FakeNewsNet dataset
 max_seq_len = 512
 learning_rate = 5e-5
 batch_size = 32
@@ -34,7 +34,7 @@ epochs = 8
 random_init = False
 resplit = True
 dropout = 0.5
-ratio = 0.5
+ratio = 1
 print(f"\nmax_seq_len = {max_seq_len}, learning_rate = {learning_rate}, batch_size = {batch_size}, epochs = {epochs},"
       f"dropout = {dropout}\n")
 
